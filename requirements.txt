@@ -1,3 +1,8 @@
 streamlit
 notion-client
 python-dotenv
+streamlit
+notion-client
+python-dotenv
+pandas
+openpyxl
