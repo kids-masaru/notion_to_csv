@@ -16,7 +16,7 @@ st.title("Notionデータベース操作ツール")
 notion_token = os.getenv("NOTION_INTEGRATION_TOKEN")
 csv_file_path = os.getenv("CSV_FILE_PATH")
 existing_database_id = os.getenv("EXISTING_DATABASE_ID") # 環境変数からのみ読み込む
-client_database_id = os.getenv("CLIENT_DATABASE_ID") # リレーション先のクライアントデータベースID
+client_database_id = os.getenv("CLIENT_DATABASE_ID") # リレーション先のクライアントデータベースID (新規DB作成時に必要)
 
 # サイドバーの設定
 with st.sidebar:
@@ -36,6 +36,13 @@ with st.sidebar:
         help="データベースを作成したいNotionのページのURLを貼り付けてください。既存データベースに追加する場合は不要です。"
     )
     
+    # リレーション先のクライアントページURLの入力欄
+    client_relation_url_input = st.text_input(
+        "リレーション先のクライアントページURL",
+        help="インポートする全ての項目をリレーションさせたいNotionのクライアントページのURLを貼り付けてください。未入力の場合、リレーションは設定されません。",
+        key="client_relation_url" # 一意のキーを設定
+    )
+    
     st.divider()
     st.info("認証情報とCSVファイルは環境変数から読み込まれます。")
     if csv_file_path:
@@ -50,12 +57,12 @@ with st.sidebar:
 
     # クライアントデータベースIDの表示 (新規作成時に必要)
     if client_database_id:
-        st.info(f"リレーション設定用クライアントデータベースID: {client_database_id}\n(新規データベース作成時にリレーションプロパティを定義するのに使用されます)")
+        st.info(f"リレーション定義用クライアントデータベースID: {client_database_id}\n(新規データベース作成時にリレーションプロパティを定義するのに使用されます)")
     else:
-        st.warning("リレーション設定用クライアントデータベースIDが環境変数に設定されていません。新規データベース作成時にリレーションプロパティを含めることができません。")
+        st.warning("リレーション定義用クライアントデータベースIDが環境変数に設定されていません。新規データベース作成時にリレーションプロパティを含めることができません。")
 
 
-# NotionのURLからページIDを抽出する関数 (既存のものをそのまま利用)
+# NotionのURLからページIDを抽出する関数
 def extract_page_id_from_url(url):
     match = re.search(r'([0-9a-f]{32})', url)
     if match:
@@ -98,8 +105,8 @@ def create_database(notion, page_id, name):
         st.error(f"データベース作成エラー: {e}")
         return None
 
-# アイコン、本文テキスト、およびURLからのリレーション設定を追加
-def add_rows_to_db(notion, db_id, csv_path): # client_db_idは不要になったので引数から削除
+# 本文テキスト、およびアプリUIから取得したURLからのリレーション設定を追加 (アイコン処理を削除)
+def add_rows_to_db(notion, db_id, csv_path, specific_client_page_id):
     # CSVファイルの存在チェック
     if not os.path.exists(csv_path):
         st.error(f"指定されたCSVファイルが見つかりません: {csv_path}")
@@ -136,45 +143,30 @@ def add_rows_to_db(notion, db_id, csv_path): # client_db_idは不要になった
                     except ValueError:
                         st.warning(f"行 {i+1}: CSVの'Date'カラム '{csv_date_str}' が無効なフォーマットです。Notionの日付は空欄になります。")
                         properties["Date"] = {"date": None}
-                # else: # Dateプロパティが存在しない可能性もあるため、常にNoneにする必要はない
-                #     properties["Date"] = {"date": None} # Not a property that exists エラーを防ぐため削除
 
-                # アイコンの処理 (変更なし)
-                page_icon = None
-                if "Icon" in csv_headers and row["Icon"].strip():
-                    icon_value = row["Icon"].strip()
-                    if len(icon_value) <= 4 and not icon_value.startswith("http"):
-                        page_icon = {"emoji": icon_value}
-                    elif icon_value.startswith("http://") or icon_value.startswith("https://"):
-                        page_icon = {"external": {"url": icon_value}}
-                    else:
-                        st.warning(f"行 {i+1}: 'Icon'カラム '{icon_value}' は無効なアイコン形式（絵文字またはURLではありません）。アイコンは設定されません。")
+                # ★変更: アイコンの処理を完全に削除
+                # page_icon = None
+                # if "Icon" in csv_headers and row["Icon"].strip():
+                #     icon_value = row["Icon"].strip()
+                #     if len(icon_value) <= 4 and not icon_value.startswith("http"):
+                #         page_icon = {"emoji": icon_value}
+                #     elif icon_value.startswith("http://") or icon_value.startswith("https://"):
+                #         page_icon = {"external": {"url": icon_value}}
+                #     else:
+                #         st.warning(f"行 {i+1}: 'Icon'カラム '{icon_value}' は無効なアイコン形式（絵文字またはURLではありません）。アイコンは設定されません。")
 
-                # ★変更: Client Name リレーションプロパティの処理 (URLからIDを抽出)
-                # 「Client URL」というCSVヘッダーを想定
-                if "Client URL" in csv_headers and row["Client URL"].strip():
-                    client_url_from_csv = row["Client URL"].strip()
-                    related_page_id = extract_page_id_from_url(client_url_from_csv) # URLからIDを抽出
-                    
-                    if related_page_id:
-                        # ここでの "Client Name" は、ターゲットのNotionデータベースにあるリレーションプロパティ名です
-                        properties["Client Name"] = {"relation": [{"id": related_page_id}]}
-                    else:
-                        st.warning(f"行 {i+1}: CSVのクライアントURL '{client_url_from_csv}' から有効なページIDを抽出できませんでした。このリレーションは設定されません。")
-                elif "Client URL" in csv_headers and not row["Client URL"].strip():
-                     # CSVのClient URLカラムが空の場合は、リレーションも空にする (プロパティが存在する場合)
-                     # ただし、NotionDBにClient Nameプロパティが存在しない場合はエラーになるので注意
-                     # ここではClient Nameプロパティが存在することを前提に処理
-                     properties["Client Name"] = {"relation": []}
-                # else: # CSVにClient URLカラムがない場合は、リレーションプロパティをpropertiesに含めない (重要)
-                #    pass # 何もしないことで、NotionDBにClient Nameプロパティがない場合でもエラーにならない
-
-
-                # ページを作成し、そのページのIDを取得
-                if page_icon:
-                    new_page = notion.pages.create(parent={"database_id": db_id}, properties=properties, icon=page_icon)
+                # リレーションプロパティの処理 (アプリUIからのIDを使用)
+                if specific_client_page_id:
+                    properties["Client Name"] = {"relation": [{"id": specific_client_page_id}]}
                 else:
-                    new_page = notion.pages.create(parent={"database_id": db_id}, properties=properties)
+                    properties["Client Name"] = {"relation": []}
+
+
+                # ページを作成し、そのページのIDを取得 (iconパラメータを削除)
+                # if page_icon: # 条件分岐も不要
+                #     new_page = notion.pages.create(parent={"database_id": db_id}, properties=properties, icon=page_icon)
+                # else:
+                new_page = notion.pages.create(parent={"database_id": db_id}, properties=properties)
                 
                 page_id = new_page["id"] # 作成されたページのIDを取得
 
@@ -201,14 +193,13 @@ def add_rows_to_db(notion, db_id, csv_path): # client_db_idは不要になった
                                 }
                             ]
                         )
-                        st.success(f"✅ 行 {i+1} のページ本文に説明を追加しました")
                     except Exception as e:
                         st.warning(f"⚠️ 行 {i+1} のページ本文への説明追加に失敗: {e}")
                 
                 st.success(f"✅ 行 {i+1} のページを作成しました")
                 time.sleep(0.3)  # APIレートリミット回避
             except KeyError as ke:
-                st.error(f"❌ 行 {i+1} の追加に失敗: CSVファイルに '{ke}' カラムが見つかりません。Notionデータベースのプロパティ名とCSVヘッダーが完全に一致していることを確認してください。")
+                st.error(f"❌ 行 {i+1} の追加に失敗: CSVファイルに '{ke}' カラムが見つかりません。Notionデータベースのプロパティ名とCSVヘッダーが完全に一致しているか確認してください。")
                 break
             except Exception as e:
                 st.error(f"❌ 行 {i+1} の追加に失敗: {e}")
@@ -216,11 +207,19 @@ def add_rows_to_db(notion, db_id, csv_path): # client_db_idは不要になった
     st.balloons()
 
 
-# ボタンのロジック (変更なし)
+# ボタンのロジック
 if st.button("データベースにデータを追加/作成") and notion_token and csv_file_path:
     notion = Client(auth=notion_token)
     
     target_db_id = None
+    
+    # リレーション先のクライアントページURLからIDを抽出
+    client_relation_page_id = None
+    if client_relation_url_input:
+        client_relation_page_id = extract_page_id_from_url(client_relation_url_input)
+        if not client_relation_page_id:
+            st.error("入力されたクライアントページURLから有効なページIDを抽出できませんでした。URLが正しいか確認してください。")
+            st.stop() # 処理を中断
 
     if existing_database_id:
         target_db_id = existing_database_id
@@ -229,8 +228,7 @@ if st.button("データベースにデータを追加/作成") and notion_token 
     if target_db_id:
         st.write(f"既存のデータベース (ID: {target_db_id}) にデータを追加します。")
         with st.spinner("処理中...\n(ページ本文にテキストを追加するため、通常より時間がかかる場合があります)"):
-            # ★変更: add_rows_to_dbの引数からclient_database_idを削除
-            add_rows_to_db(notion, target_db_id, csv_file_path) 
+            add_rows_to_db(notion, target_db_id, csv_file_path, client_relation_page_id) 
             db_link = f"https://notion.so/{target_db_id.replace('-', '')}"
             st.markdown(f"[データが追加されたデータベースを開く]({db_link})")
     else:
@@ -242,8 +240,7 @@ if st.button("データベースにデータを追加/作成") and notion_token 
                     db_id = create_database(notion, parent_page_id, db_name)
                     
                     if db_id:
-                        # ★変更: add_rows_to_dbの引数からclient_database_idを削除
-                        add_rows_to_db(notion, db_id, csv_file_path)
+                        add_rows_to_db(notion, db_id, csv_file_path, client_relation_page_id)
                         db_link = f"https://notion.so/{db_id.replace('-', '')}"
                         st.markdown(f"[作成されたデータベースを開く]({db_link})")
             else:
