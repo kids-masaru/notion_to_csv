@@ -3,7 +3,7 @@ from notion_client import Client
 import os
 import csv
 import time
-import re # URL抽出に必要だったが、親ページURLからIDを抽出する方法に戻すため使用を再検討
+import re
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -30,7 +30,6 @@ with st.sidebar:
     db_name = st.text_input("新規作成時のデータベース名", "タスク管理DB")
     
     # 親ページURLの入力欄 (新規データベース作成時のみ使用)
-    # ここでのURLからのID抽出は必要なので、extract_page_id_from_url は維持します
     parent_page_url = st.text_input(
         "親ページURL (新規データベース作成時のみ使用)",
         help="データベースを作成したいNotionのページのURLを貼り付けてください。既存データベースに追加する場合は不要です。"
@@ -59,19 +58,16 @@ def extract_page_id_from_url(url):
         return match.group(1).replace('-', '')
     return None
 
-# 新規データベース作成関数 (リレーションプロパティの定義を削除)
+# 新規データベース作成関数
 def create_database(notion, page_id, name):
     properties = {
         "名前": {"title": {}},
         "作業順": {"multi_select": {}},
         "対応": {"select": {}},
         "担当": {"multi_select": {}},
-        # "csv" プロパティは維持
         "csv": {"rich_text": {}}
     }
     
-    # リレーションプロパティに関する処理は全て削除
-
     try:
         new_db = notion.databases.create(
             parent={"page_id": page_id, "type": "page_id"},
@@ -84,8 +80,8 @@ def create_database(notion, page_id, name):
         st.error(f"データベース作成エラー: {e}")
         return None
 
-# 行の追加関数 (リレーション、アイコン処理を削除)
-def add_rows_to_db(notion, db_id, csv_path): # specific_client_page_id 引数を削除
+# 行の追加関数
+def add_rows_to_db(notion, db_id, csv_path):
     # CSVファイルの存在チェック
     if not os.path.exists(csv_path):
         st.error(f"指定されたCSVファイルが見つかりません: {csv_path}")
@@ -93,7 +89,8 @@ def add_rows_to_db(notion, db_id, csv_path): # specific_client_page_id 引数を
 
     st.write(f"CSVファイル '{csv_path}' からデータを読み込み中...")
 
-    with open(csv_path, 'r', encoding='utf-8') as f:
+    # ★変更: エンコードを 'utf-8-sig' に変更
+    with open(csv_path, 'r', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         
         required_csv_headers = ["名前", "作業順", "対応", "担当"] 
@@ -123,13 +120,10 @@ def add_rows_to_db(notion, db_id, csv_path): # specific_client_page_id 引数を
                         st.warning(f"行 {i+1}: CSVの'Date'カラム '{csv_date_str}' が無効なフォーマットです。Notionの日付は空欄になります。")
                         properties["Date"] = {"date": None}
 
-                # CSVの「csv」項目をNotionの「csv」プロパティに設定 (維持)
+                # CSVの「csv」項目をNotionの「csv」プロパティに設定
                 if "csv" in csv_headers and row["csv"].strip():
                     properties["csv"] = {"rich_text": [{"text": {"content": row["csv"].strip()}}]}
 
-                # リレーションプロパティの処理は全て削除
-                # specific_client_page_id を使用するロジックは削除
-                
                 # ページを作成し、そのページのIDを取得
                 new_page = notion.pages.create(parent={"database_id": db_id}, properties=properties)
                 
@@ -164,7 +158,7 @@ def add_rows_to_db(notion, db_id, csv_path): # specific_client_page_id 引数を
                 st.success(f"✅ 行 {i+1} のページを作成しました")
                 time.sleep(0.3)  # APIレートリミット回避
             except KeyError as ke:
-                st.error(f"❌ 行 {i+1} の追加に失敗: CSVファイルに '{ke}' カラムが見つかりません。Notionデータベースのプロパティ名とCSVヘッダーが完全に一致していることを確認してください。")
+                st.error(f"❌ 行 {i+1} の追加に失敗: CSVファイルに '{ke}' カラムが見つかりません。Notionデータベースのプロパティ名とCSVヘッダーが完全に一致しているか確認してください。")
                 break
             except Exception as e:
                 st.error(f"❌ 行 {i+1} の追加に失敗: {e}")
@@ -178,14 +172,6 @@ if st.button("データベースにデータを追加/作成") and notion_token 
     
     target_db_id = None
     
-    # リレーション先のクライアントページURLからIDを抽出する処理も削除
-    # client_relation_page_id = None
-    # if client_relation_url_input:
-    #     client_relation_page_id = extract_page_id_from_url(client_relation_url_input)
-    #     if not client_relation_page_id:
-    #         st.error("入力されたクライアントページURLから有効なページIDを抽出できませんでした。URLが正しいか確認してください。")
-    #         st.stop() # 処理を中断
-
     if existing_database_id:
         target_db_id = existing_database_id
         st.info(f"環境変数の既存データベースID ({target_db_id}) を使用します。")
@@ -193,7 +179,6 @@ if st.button("データベースにデータを追加/作成") and notion_token 
     if target_db_id:
         st.write(f"既存のデータベース (ID: {target_db_id}) にデータを追加します。")
         with st.spinner("処理中...\n(ページ本文にテキストを追加するため、通常より時間がかかる場合があります)"):
-            # add_rows_to_db に specific_client_page_id を渡さない
             add_rows_to_db(notion, target_db_id, csv_file_path) 
             db_link = f"https://notion.so/{target_db_id.replace('-', '')}"
             st.markdown(f"[データが追加されたデータベースを開く]({db_link})")
@@ -206,7 +191,6 @@ if st.button("データベースにデータを追加/作成") and notion_token 
                     db_id = create_database(notion, parent_page_id, db_name)
                     
                     if db_id:
-                        # add_rows_to_db に specific_client_page_id を渡さない
                         add_rows_to_db(notion, db_id, csv_file_path)
                         db_link = f"https://notion.so/{db_id.replace('-', '')}"
                         st.markdown(f"[作成されたデータベースを開く]({db_link})")
