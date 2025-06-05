@@ -4,7 +4,7 @@ import os
 import csv
 import time
 import re
-from datetime import datetime
+from datetime import datetime # datetimeは引き続きCSVのDateカラムをパースするのに必要（もしCSVにDateカラムが残っている場合）
 from dotenv import load_dotenv
 
 # .envファイルから環境変数を読み込む
@@ -58,14 +58,15 @@ def extract_page_id_from_url(url):
         return match.group(1).replace('-', '')
     return None
 
-# 新規データベース作成関数 (「説明」プロパティを削除)
+# 新規データベース作成関数 (「説明」と「Date」プロパティを削除)
 def create_database(notion, page_id, name):
     properties = {
         "名前": {"title": {}},
         "作業順": {"multi_select": {}},
         "対応": {"select": {}},
         "担当": {"multi_select": {}},
-        "Date": {"date": {}}
+        # "説明": {"rich_text": {}}, # 説明は本文に移動
+        # "Date": {"date": {}} # Dateプロパティを完全に削除
     }
     
     try:
@@ -80,7 +81,7 @@ def create_database(notion, page_id, name):
         st.error(f"データベース作成エラー: {e}")
         return None
 
-# アイコンと本文テキストを追加
+# アイコンと本文テキストを追加 (Dateプロパティの処理も削除)
 def add_rows_to_db(notion, db_id, csv_path): 
     # CSVファイルの存在チェック
     if not os.path.exists(csv_path):
@@ -110,17 +111,17 @@ def add_rows_to_db(notion, db_id, csv_path):
                     "担当": {"multi_select": [{"name": tag.strip()} for tag in row["担当"].split(',') if tag.strip()]},
                 }
 
-                # Dateカラムの処理 (変更なし)
-                if "Date" in csv_headers and row["Date"].strip():
-                    csv_date_str = row["Date"].strip()
-                    try:
-                        parsed_date = datetime.strptime(csv_date_str, "%Y-%m-%d")
-                        properties["Date"] = {"date": {"start": parsed_date.isoformat().split('T')[0]}}
-                    except ValueError:
-                        st.warning(f"行 {i+1}: CSVの'Date'カラム '{csv_date_str}' が無効なフォーマットです。Notionの日付は空欄になります。")
-                        properties["Date"] = {"date": None}
-                else:
-                    properties["Date"] = {"date": None}
+                # Dateカラムの処理を完全に削除 (CSVにDateカラムがあっても無視)
+                # if "Date" in csv_headers and row["Date"].strip():
+                #     csv_date_str = row["Date"].strip()
+                #     try:
+                #         parsed_date = datetime.strptime(csv_date_str, "%Y-%m-%d")
+                #         properties["Date"] = {"date": {"start": parsed_date.isoformat().split('T')[0]}}
+                #     except ValueError:
+                #         st.warning(f"行 {i+1}: CSVの'Date'カラム '{csv_date_str}' が無効なフォーマットです。Notionの日付は空欄になります。")
+                #         properties["Date"] = {"date": None}
+                # else:
+                #     properties["Date"] = {"date": None}
 
                 # アイコンの処理 (変更なし)
                 page_icon = None
@@ -206,7 +207,7 @@ if st.button("データベースにデータを追加/作成") and notion_token 
                     if db_id:
                         add_rows_to_db(notion, db_id, csv_file_path)
                         db_link = f"https://notion.so/{db_id.replace('-', '')}"
-                        st.markdown(f"[作成されたデータベースを開く]({db_link})")
+                        st.markdown(f"[作成されたデータベースを開く]({db_id})") # ここをdb_linkに修正
             else:
                 st.error("入力された親ページURLから有効なページIDを抽出できませんでした。URLが正しいか確認してください。")
         else:
