@@ -5,7 +5,6 @@ import time
 import re
 from datetime import datetime
 from dotenv import load_dotenv
-import tempfile
 import pandas as pd # pandasをインポート
 # import openpyxl # openpyxlはpandasが依存するため、直接インポートは不要だが、明示したい場合は記述
 
@@ -14,8 +13,10 @@ load_dotenv()
 
 st.title("Notionデータベース操作ツール")
 
-# 環境変数から認証情報を読み込む
+# 環境変数から認証情報とExcelファイルパスを読み込む
 notion_token = os.getenv("NOTION_INTEGRATION_TOKEN")
+# ★変更: CSV_FILE_PATH を EXCEL_FILE_PATH に変更
+excel_file_path = os.getenv("EXCEL_FILE_PATH") 
 existing_database_id = os.getenv("EXISTING_DATABASE_ID")
 
 # サイドバーの設定
@@ -37,10 +38,16 @@ with st.sidebar:
     )
 
     st.divider()
-    # ★変更: ファイルアップロードをExcel形式 (.xlsx) に変更
-    uploaded_file = st.file_uploader("Excelファイル (.xlsx) をアップロード", type=["xlsx"]) # CSVも許容するなら ["xlsx", "csv"]
+    # ★変更: ファイルアップロードUIを完全に削除
+    # uploaded_file = st.file_uploader("Excelファイル (.xlsx) をアップロード", type=["xlsx"]) 
 
     st.info("認証情報は環境変数から読み込まれます。")
+    # ★変更: Excelファイルパスの表示
+    if excel_file_path:
+        st.info(f"使用するExcelファイル: {excel_file_path}")
+    else:
+        st.warning("Excelファイルパスが環境変数に設定されていません。")
+    
     if existing_database_id:
         st.info(f"既存データベースID (初期設定): {existing_database_id}")
     else:
@@ -64,7 +71,7 @@ def create_database(notion, page_id, name):
         "作業順": {"multi_select": {}},
         "対応": {"select": {}},
         "担当": {"multi_select": {}},
-        "csv": {"rich_text": {}} # CSV→Excelに変わってもプロパティ名は「csv」のままでOK
+        "csv": {"rich_text": {}} # プロパティ名はそのまま「csv」を使用
     }
     
     try:
@@ -79,8 +86,8 @@ def create_database(notion, page_id, name):
         st.error(f"データベース作成エラー: {e}")
         return None
 
-# 行の追加関数 (Excelファイルを読み込むように変更)
-def add_rows_to_db(notion, db_id, excel_file_path): # 引数名をcsv_pathからexcel_file_pathに変更
+# 行の追加関数 (Excelファイルを読み込む)
+def add_rows_to_db(notion, db_id, excel_file_path): # 引数名をexcel_file_pathに変更
     # ファイルの存在チェック
     if not os.path.exists(excel_file_path):
         st.error(f"指定されたExcelファイルが見つかりません: {excel_file_path}")
@@ -120,21 +127,17 @@ def add_rows_to_db(notion, db_id, excel_file_path): # 引数名をcsv_pathから
             }
 
             # Dateカラムの処理
+            # pandasは日付をdatetimeオブジェクトで読み込むことが多いので、その対応も追加
             if "Date" in excel_headers and pd.notna(row["Date"]): # NaN (欠損値) チェック
-                csv_date_str = str(row["Date"]).strip() # Excelから読み込むとdatetimeオブジェクトの場合もあるのでstr()に変換
                 try:
-                    # pandasは日付をdatetimeオブジェクトで読み込むことが多いので、その対応も追加
                     if isinstance(row["Date"], datetime):
                         parsed_date = row["Date"]
                     else: # 文字列の場合はパースを試みる
-                        parsed_date = datetime.strptime(csv_date_str, "%Y-%m-%d")
+                        parsed_date = datetime.strptime(str(row["Date"]).strip(), "%Y-%m-%d")
                     
                     properties["Date"] = {"date": {"start": parsed_date.isoformat().split('T')[0]}}
-                except ValueError:
-                    st.warning(f"行 {i+1}: Excelの'Date'カラム '{csv_date_str}' が無効なフォーマットです。Notionの日付は空欄になります。")
-                    properties["Date"] = {"date": None}
-                except TypeError: # datetimeオブジェクト以外の型が来た場合
-                    st.warning(f"行 {i+1}: Excelの'Date'カラム '{row['Date']}' が予期せぬ型です。日付として処理できません。")
+                except (ValueError, TypeError): # 日付変換のエラーをまとめてキャッチ
+                    st.warning(f"行 {i+1}: Excelの'Date'カラム '{row['Date']}' が無効なフォーマットまたは型です。Notionの日付は空欄になります。")
                     properties["Date"] = {"date": None}
             else:
                 properties["Date"] = {"date": None} # Dateカラムがないか空の場合
@@ -189,15 +192,12 @@ def add_rows_to_db(notion, db_id, excel_file_path): # 引数名をcsv_pathから
 
 # ボタンのロジック
 if st.button("データベースにデータを追加/作成") and notion_token:
-    if uploaded_file is None:
-        st.error("Excelファイルをアップロードしてください。")
+    # ★変更: Excelファイルパスが設定されていることを確認
+    if not excel_file_path:
+        st.error("環境変数 'EXCEL_FILE_PATH' が設定されていません。アプリと同じ階層にExcelファイルを配置し、.envファイルでパスを指定してください。")
         st.stop()
 
-    # アップロードされたファイルを一時ファイルとして保存
-    # ★変更: .xlsx の場合は suffix=".xlsx" にする
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_file: 
-        tmp_file.write(uploaded_file.getvalue())
-        excel_file_path = tmp_file.name # 一時ファイルのパスを取得
+    # ファイルの存在確認は add_rows_to_db 内で行う
 
     notion = Client(auth=notion_token)
     
@@ -210,7 +210,7 @@ if st.button("データベースにデータを追加/作成") and notion_token:
     if target_db_id:
         st.write(f"既存のデータベース (ID: {target_db_id}) にデータを追加します。")
         with st.spinner("処理中...\n(ページ本文にテキストを追加するため、通常より時間がかかる場合があります)"):
-            add_rows_to_db(notion, target_db_id, excel_file_path) 
+            add_rows_to_db(notion, target_db_id, excel_file_path) # 引数を excel_file_path に変更
             db_link = f"https://notion.so/{target_db_id.replace('-', '')}"
             st.markdown(f"[データが追加されたデータベースを開く]({db_link})")
     else:
@@ -222,7 +222,7 @@ if st.button("データベースにデータを追加/作成") and notion_token:
                     db_id = create_database(notion, parent_page_id, db_name)
                     
                     if db_id:
-                        add_rows_to_db(notion, db_id, excel_file_path)
+                        add_rows_to_db(notion, db_id, excel_file_path) # 引数を excel_file_path に変更
                         db_link = f"https://notion.so/{db_id.replace('-', '')}"
                         st.markdown(f"[作成されたデータベースを開く]({db_link})")
             else:
@@ -230,6 +230,6 @@ if st.button("データベースにデータを追加/作成") and notion_token:
         else:
             st.error("データを追加または新規作成するには、既存データベースIDが設定されているか、または親ページURLの入力が必要です。")
     
-    # 一時ファイルを削除
-    if os.path.exists(excel_file_path):
-        os.remove(excel_file_path)
+    # ★変更: 一時ファイルの削除ロジックは不要
+    # if os.path.exists(excel_file_path):
+    #     os.remove(excel_file_path)
