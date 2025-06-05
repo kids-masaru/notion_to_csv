@@ -89,9 +89,33 @@ def add_rows_to_db(notion, db_id, csv_path):
 
     st.write(f"CSVファイル '{csv_path}' からデータを読み込み中...")
 
-    # ★変更: エンコードを 'utf-8-sig' に変更
-    with open(csv_path, 'r', encoding='utf-8-sig') as f:
+    reader = None
+    try:
+        # 最初に utf-8-sig で試行
+        f = open(csv_path, 'r', encoding='utf-8-sig')
         reader = csv.DictReader(f)
+    except UnicodeDecodeError:
+        try:
+            # utf-8-sig で失敗した場合、cp932 (Shift_JIS) で試行
+            f = open(csv_path, 'r', encoding='cp932')
+            reader = csv.DictReader(f)
+            st.warning("CSVファイルのエンコードが 'utf-8-sig' ではないようです。'cp932' (Shift_JIS) で読み込みました。")
+        except UnicodeDecodeError:
+            st.error("CSVファイルのエンコードを 'utf-8-sig' または 'cp932' のどちらでも自動判別できませんでした。CSVファイルのエンコードを確認してください。")
+            return
+        except Exception as e:
+            st.error(f"CSVファイルの読み込み中に予期せぬエラーが発生しました: {e}")
+            return
+    except Exception as e:
+        st.error(f"CSVファイルの読み込み中に予期せぬエラーが発生しました: {e}")
+        return
+
+    # reader が None の場合はエラーでリターンしているはずだが、念のためチェック
+    if reader is None:
+        return
+
+    with f: # f は try-except ブロック内で開かれたファイルオブジェクト
+        csv_headers = reader.fieldnames
         
         required_csv_headers = ["名前", "作業順", "対応", "担当"] 
         csv_headers = reader.fieldnames
