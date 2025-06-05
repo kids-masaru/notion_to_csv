@@ -79,6 +79,8 @@ def create_database(notion, page_id, name):
         "作業順": {"multi_select": {}},
         "対応": {"select": {}},
         "担当": {"multi_select": {}},
+        # ★追加: "csv" プロパティを新規データベース作成時に定義
+        "csv": {"rich_text": {}}
     }
     
     # client_database_idが設定されている場合のみリレーションプロパティを含める
@@ -144,16 +146,10 @@ def add_rows_to_db(notion, db_id, csv_path, specific_client_page_id):
                         st.warning(f"行 {i+1}: CSVの'Date'カラム '{csv_date_str}' が無効なフォーマットです。Notionの日付は空欄になります。")
                         properties["Date"] = {"date": None}
 
-                # ★変更: アイコンの処理を完全に削除
-                # page_icon = None
-                # if "Icon" in csv_headers and row["Icon"].strip():
-                #     icon_value = row["Icon"].strip()
-                #     if len(icon_value) <= 4 and not icon_value.startswith("http"):
-                #         page_icon = {"emoji": icon_value}
-                #     elif icon_value.startswith("http://") or icon_value.startswith("https://"):
-                #         page_icon = {"external": {"url": icon_value}}
-                #     else:
-                #         st.warning(f"行 {i+1}: 'Icon'カラム '{icon_value}' は無効なアイコン形式（絵文字またはURLではありません）。アイコンは設定されません。")
+                # ★追加: CSVの「csv」項目をNotionの「csv」プロパティに設定
+                if "csv" in csv_headers and row["csv"].strip():
+                    properties["csv"] = {"rich_text": [{"text": {"content": row["csv"].strip()}}]}
+                # else: CSVに「csv」カラムがない、または空の場合は、このプロパティを設定しない
 
                 # リレーションプロパティの処理 (アプリUIからのIDを使用)
                 if specific_client_page_id:
@@ -163,9 +159,6 @@ def add_rows_to_db(notion, db_id, csv_path, specific_client_page_id):
 
 
                 # ページを作成し、そのページのIDを取得 (iconパラメータを削除)
-                # if page_icon: # 条件分岐も不要
-                #     new_page = notion.pages.create(parent={"database_id": db_id}, properties=properties, icon=page_icon)
-                # else:
                 new_page = notion.pages.create(parent={"database_id": db_id}, properties=properties)
                 
                 page_id = new_page["id"] # 作成されたページのIDを取得
