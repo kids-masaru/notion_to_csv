@@ -60,13 +60,12 @@ def extract_page_id_from_url(url):
 
 # 新規データベース作成関数 (日付プロパティを含まない)
 def create_database(notion, page_id, name):
-    properties = {
-        "名前": {"title": {}},
-        "作業順": {"multi_select": {}},
-        "対応": {"select": {}},
-        "担当": {"multi_select": {}},
-        "csv": {"rich_text": {}} # プロパティ名はそのまま「csv」を使用
-    }
+    properties = {
+        "名前": {"title": [{"text": {"content": str(row["名前"])}}]},
+        "作業順": {"multi_select": [{"name": tag.strip()} for tag in str(row["作業順"]).split(',') if tag.strip()]},
+        "対応": {"select": {"name": str(row["対応"]).strip()}},
+        "担当": {"select": {"name": str(row["担当"]).strip()}}, # ★ここを修正
+    }
     
     try:
         new_db = notion.databases.create(
