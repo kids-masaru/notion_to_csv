@@ -59,12 +59,12 @@ def extract_page_id_from_url(url):
 # 新規データベース作成関数
 def create_database(notion, page_id, name):
     # データベース作成時はプロパティの「型」のみを定義します。
+    # 「csv」プロパティの定義を削除しました。
     properties = {
         "名前": {"title": {}},            # Notion: タイトル
         "作業順": {"select": {}},         # Notion: 単一選択 (Select)
         "対応": {"select": {}},           # Notion: 単一選択 (Select)
         "担当": {"select": {}},           # Notion: 単一選択 (Select)
-        "csv": {"rich_text": {}}          # Notion: テキスト (Text) またはリッチテキスト (Rich text)
     }
 
     try:
@@ -101,7 +101,7 @@ def add_rows_to_db(notion, db_id, excel_file_path):
     # DataFrameのヘッダー（カラム名）を取得
     excel_headers = df.columns.tolist()
 
-    # Notionデータベースに追加する必須ヘッダー
+    # Notionデータベースに追加する必須ヘッダー (csvを削除)
     required_headers = ["名前", "作業順", "対応", "担当"]
 
     missing_headers = [header for header in required_headers if header not in excel_headers]
@@ -117,16 +117,13 @@ def add_rows_to_db(notion, db_id, excel_file_path):
         try:
             properties = {
                 "名前": {"title": [{"text": {"content": str(row["名前"])}}]},
-                "作業順": {"select": {"name": str(row["作業順"]).strip()}}, # ★ 修正点: 作業順も単一選択
+                "作業順": {"select": {"name": str(row["作業順"]).strip()}}, # 作業順は単一選択
                 "対応": {"select": {"name": str(row["対応"]).strip()}},
-                "担当": {"select": {"name": str(row["担当"]).strip()}},     # ★ 修正点: 担当も単一選択
+                "担当": {"select": {"name": str(row["担当"]).strip()}},     # 担当は単一選択
             }
 
-            # Excelの「csv」項目をNotionの「csv」プロパティに設定
-            if "csv" in excel_headers and pd.notna(row["csv"]) and str(row["csv"]).strip():
-                properties["csv"] = {"rich_text": [{"text": {"content": str(row["csv"]).strip()}}]}
-            else:
-                properties["csv"] = {"rich_text": []} # 値がない場合は空のリストを設定
+            # ★ 修正点: 「csv」プロパティに関する処理を完全に削除しました。
+            # Excelに「csv」列が存在しない、かつNotionにも「csv」プロパティが不要な場合
 
             # ページを作成し、そのページのIDを取得
             new_page = notion.pages.create(parent={"database_id": db_id}, properties=properties)
