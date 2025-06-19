@@ -56,16 +56,15 @@ def extract_page_id_from_url(url):
         return match.group(1).replace('-', '')
     return None
 
-# 新規データベース作成関数 (日付プロパティを含まない)
+# 新規データベース作成関数
 def create_database(notion, page_id, name):
-    # ★ 修正点: データベース作成時はプロパティの「型」のみを定義します。
-    # Excelの行データ（row）はまだ存在しません。
+    # データベース作成時はプロパティの「型」のみを定義します。
     properties = {
         "名前": {"title": {}},            # Notion: タイトル
-        "作業順": {"multi_select": {}}, # Notion: 複数選択 (Multi-select) に設定してください
-        "対応": {"select": {}},           # Notion: 単一選択 (Select) に設定してください
-        "担当": {"select": {}},           # Notion: 単一選択 (Select) に設定してください
-        "csv": {"rich_text": {}}          # Notion: テキスト (Text) またはリッチテキスト (Rich text) に設定してください
+        "作業順": {"select": {}},         # Notion: 単一選択 (Select)
+        "対応": {"select": {}},           # Notion: 単一選択 (Select)
+        "担当": {"select": {}},           # Notion: 単一選択 (Select)
+        "csv": {"rich_text": {}}          # Notion: テキスト (Text) またはリッチテキスト (Rich text)
     }
 
     try:
@@ -118,16 +117,12 @@ def add_rows_to_db(notion, db_id, excel_file_path):
         try:
             properties = {
                 "名前": {"title": [{"text": {"content": str(row["名前"])}}]},
-                # ★ ここも確認: 「作業順」がNotionで「単一選択」なら以下の行をコメント解除して使用してください
-                # "作業順": {"select": {"name": str(row["作業順"]).strip()}},
-                # 「作業順」がNotionで「複数選択」なら以下の行を使用してください（現状のコード）
-                "作業順": {"multi_select": [{"name": tag.strip()} for tag in str(row["作業順"]).split(',') if tag.strip()]},
+                "作業順": {"select": {"name": str(row["作業順"]).strip()}}, # ★ 修正点: 作業順も単一選択
                 "対応": {"select": {"name": str(row["対応"]).strip()}},
-                "担当": {"select": {"name": str(row["担当"]).strip()}}, # ★ 修正点: 担当は単一選択
+                "担当": {"select": {"name": str(row["担当"]).strip()}},     # ★ 修正点: 担当も単一選択
             }
 
             # Excelの「csv」項目をNotionの「csv」プロパティに設定
-            # 「csv」カラムがExcelに存在し、かつ値が空白でない場合に設定
             if "csv" in excel_headers and pd.notna(row["csv"]) and str(row["csv"]).strip():
                 properties["csv"] = {"rich_text": [{"text": {"content": str(row["csv"]).strip()}}]}
             else:
@@ -139,7 +134,6 @@ def add_rows_to_db(notion, db_id, excel_file_path):
             page_id = new_page["id"]
 
             # ページの本文にテキストを追加 (「説明」カラムの内容)
-            # 「説明」カラムがExcelに存在し、かつ値が空白でない場合に設定
             if "説明" in excel_headers and pd.notna(row["説明"]) and str(row["説明"]).strip():
                 description_text = str(row["説明"]).strip()
                 try:
@@ -170,11 +164,11 @@ def add_rows_to_db(notion, db_id, excel_file_path):
             time.sleep(0.3) # Notion APIのレートリミットを考慮
         except KeyError as ke:
             st.error(f"❌ 行 {i+1} の追加に失敗: Excelファイルに '{ke}' カラムが見つかりません。")
-            st.error("Notionデータベースのプロパティ名とExcelのヘッダーが完全に一致しているか確認してください。")
+            st.error("Notionデータベースのプロパティ名とExcelのヘッダーが完全に一致していることを確認してください。")
             break # エラーが発生したら処理を中断
         except Exception as e:
             st.error(f"❌ 行 {i+1} の追加に失敗: {e}")
-            st.error("Notionのプロパティ設定とExcelデータが一致しているか確認してください。特に、Select/Multi-selectの選択肢がNotion側に存在するかなど。")
+            st.error("Notionのプロパティ設定とExcelデータが一致しているか確認してください。特に、Selectの選択肢がNotion側に存在するかなど。")
             break # エラーが発生したら処理を中断
 
     progress_bar.empty() # プログレスバーを非表示にする
