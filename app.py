@@ -3,7 +3,6 @@ from notion_client import Client
 import os
 import time
 import re
-# from datetime import datetime # ★変更: datetime は日付処理不要のため削除
 from dotenv import load_dotenv
 import pandas as pd
 
@@ -14,7 +13,7 @@ st.title("Notionデータベース操作ツール")
 
 # 環境変数から認証情報とExcelファイルパスを読み込む
 notion_token = os.getenv("NOTION_INTEGRATION_TOKEN")
-excel_file_path = os.getenv("EXCEL_FILE_PATH") 
+excel_file_path = os.getenv("EXCEL_FILE_PATH")
 existing_database_id = os.getenv("EXISTING_DATABASE_ID")
 
 # サイドバーの設定
@@ -28,7 +27,7 @@ with st.sidebar:
     st.divider()
     st.header("データベース設定")
     db_name = st.text_input("新規作成時のデータベース名", "タスク管理DB")
-    
+
     # 親ページURLの入力欄 (新規データベース作成時のみ使用)
     parent_page_url = st.text_input(
         "親ページURL (新規データベース作成時のみ使用)",
@@ -41,12 +40,11 @@ with st.sidebar:
         st.info(f"使用するExcelファイル: {excel_file_path}")
     else:
         st.warning("Excelファイルパスが環境変数に設定されていません。")
-    
+
     if existing_database_id:
         st.info(f"既存データベースID (初期設定): {existing_database_id}")
     else:
         st.info("既存データベースIDは設定されていません。")
-
 
 # NotionのURLからページIDを抽出する関数
 def extract_page_id_from_url(url):
@@ -60,13 +58,16 @@ def extract_page_id_from_url(url):
 
 # 新規データベース作成関数 (日付プロパティを含まない)
 def create_database(notion, page_id, name):
+    # ★ 修正点: データベース作成時はプロパティの「型」のみを定義します。
+    # Excelの行データ（row）はまだ存在しません。
     properties = {
-        "名前": {"title": [{"text": {"content": str(row["名前"])}}]},
-        "作業順": {"select": {"name": str(row["作業順"]).strip()}},
-        "対応": {"select": {"name": str(row["対応"]).strip()}},
-        "担当": {"select": {"name": str(row["担当"]).strip()}},
+        "名前": {"title": {}},            # Notion: タイトル
+        "作業順": {"multi_select": {}}, # Notion: 複数選択 (Multi-select) に設定してください
+        "対応": {"select": {}},           # Notion: 単一選択 (Select) に設定してください
+        "担当": {"select": {}},           # Notion: 単一選択 (Select) に設定してください
+        "csv": {"rich_text": {}}          # Notion: テキスト (Text) またはリッチテキスト (Rich text) に設定してください
     }
-    
+
     try:
         new_db = notion.databases.create(
             parent={"page_id": page_id, "type": "page_id"},
@@ -77,9 +78,10 @@ def create_database(notion, page_id, name):
         return new_db["id"]
     except Exception as e:
         st.error(f"データベース作成エラー: {e}")
+        st.error("Notion APIの権限設定（インテグレーションが親ページへのアクセス権を持っているか）、またはプロパティの型定義がNotionの仕様と一致しているか確認してください。")
         return None
 
-# 行の追加関数 (日付処理を削除)
+# 行の追加関数
 def add_rows_to_db(notion, db_id, excel_file_path):
     # ファイルの存在チェック
     if not os.path.exists(excel_file_path):
@@ -99,39 +101,45 @@ def add_rows_to_db(notion, db_id, excel_file_path):
 
     # DataFrameのヘッダー（カラム名）を取得
     excel_headers = df.columns.tolist()
-    
-    required_headers = ["名前", "作業順", "対応", "担当"] 
-    
+
+    # Notionデータベースに追加する必須ヘッダー
+    required_headers = ["名前", "作業順", "対応", "担当"]
+
     missing_headers = [header for header in required_headers if header not in excel_headers]
     if missing_headers:
-        st.error(f"Excelファイルに以下の必須ヘッダーが見つかりません: {', '.join(missing_headers)}。Notionデータベースのプロパティ名とExcelのヘッダーが完全に一致していることを確認してください。")
+        st.error(f"Excelファイルに以下の必須ヘッダーが見つかりません: {', '.join(missing_headers)}。")
+        st.error("Notionデータベースのプロパティ名とExcelのヘッダーが完全に一致していることを確認してください。")
         return
 
     # DataFrameの各行をイテレートしてNotionにデータを追加
+    progress_bar = st.progress(0)
     for i, row_series in df.iterrows():
         row = row_series.to_dict()
         try:
             properties = {
                 "名前": {"title": [{"text": {"content": str(row["名前"])}}]},
+                # ★ ここも確認: 「作業順」がNotionで「単一選択」なら以下の行をコメント解除して使用してください
+                # "作業順": {"select": {"name": str(row["作業順"]).strip()}},
+                # 「作業順」がNotionで「複数選択」なら以下の行を使用してください（現状のコード）
                 "作業順": {"multi_select": [{"name": tag.strip()} for tag in str(row["作業順"]).split(',') if tag.strip()]},
                 "対応": {"select": {"name": str(row["対応"]).strip()}},
-                "担当": {"multi_select": [{"name": tag.strip()} for tag in str(row["担当"]).split(',') if tag.strip()]},
+                "担当": {"select": {"name": str(row["担当"]).strip()}}, # ★ 修正点: 担当は単一選択
             }
 
-            # ★変更: "Date"プロパティに関する処理を完全に削除しました。
-
             # Excelの「csv」項目をNotionの「csv」プロパティに設定
+            # 「csv」カラムがExcelに存在し、かつ値が空白でない場合に設定
             if "csv" in excel_headers and pd.notna(row["csv"]) and str(row["csv"]).strip():
                 properties["csv"] = {"rich_text": [{"text": {"content": str(row["csv"]).strip()}}]}
-            else: 
-                properties["csv"] = {"rich_text": []}
+            else:
+                properties["csv"] = {"rich_text": []} # 値がない場合は空のリストを設定
 
             # ページを作成し、そのページのIDを取得
             new_page = notion.pages.create(parent={"database_id": db_id}, properties=properties)
-            
+
             page_id = new_page["id"]
 
             # ページの本文にテキストを追加 (「説明」カラムの内容)
+            # 「説明」カラムがExcelに存在し、かつ値が空白でない場合に設定
             if "説明" in excel_headers and pd.notna(row["説明"]) and str(row["説明"]).strip():
                 description_text = str(row["説明"]).strip()
                 try:
@@ -156,32 +164,37 @@ def add_rows_to_db(notion, db_id, excel_file_path):
                     )
                 except Exception as e:
                     st.warning(f"⚠️ 行 {i+1} のページ本文への説明追加に失敗: {e}")
-            
+
             st.success(f"✅ 行 {i+1} のページを作成しました")
-            time.sleep(0.3)
+            progress_bar.progress((i + 1) / len(df)) # プログレスバーを更新
+            time.sleep(0.3) # Notion APIのレートリミットを考慮
         except KeyError as ke:
-            st.error(f"❌ 行 {i+1} の追加に失敗: Excelファイルに '{ke}' カラムが見つかりません。Notionデータベースのプロパティ名とExcelのヘッダーが完全に一致しているか確認してください。")
-            break
+            st.error(f"❌ 行 {i+1} の追加に失敗: Excelファイルに '{ke}' カラムが見つかりません。")
+            st.error("Notionデータベースのプロパティ名とExcelのヘッダーが完全に一致しているか確認してください。")
+            break # エラーが発生したら処理を中断
         except Exception as e:
             st.error(f"❌ 行 {i+1} の追加に失敗: {e}")
+            st.error("Notionのプロパティ設定とExcelデータが一致しているか確認してください。特に、Select/Multi-selectの選択肢がNotion側に存在するかなど。")
+            break # エラーが発生したら処理を中断
+
+    progress_bar.empty() # プログレスバーを非表示にする
     st.success("✅ すべての処理が完了しました！")
     st.balloons()
 
-
-# ボタンのロジック
+# --- ボタンのロジック ---
 if st.button("データベースにデータを追加/作成") and notion_token:
     if not excel_file_path:
         st.error("環境変数 'EXCEL_FILE_PATH' が設定されていません。アプリと同じ階層にExcelファイルを配置し、.envファイルでパスを指定してください。")
         st.stop()
 
     notion = Client(auth=notion_token)
-    
+
     target_db_id = None
-    
+
     if existing_database_id:
         target_db_id = existing_database_id
         st.info(f"環境変数の既存データベースID ({target_db_id}) を使用します。")
-    
+
     if target_db_id:
         st.write(f"既存のデータベース (ID: {target_db_id}) にデータを追加します。")
         with st.spinner("処理中...\n(ページ本文にテキストを追加するため、通常より時間がかかる場合があります)"):
@@ -195,8 +208,8 @@ if st.button("データベースにデータを追加/作成") and notion_token:
                 st.write(f"親ページ (ID: {parent_page_id}) の下に新しいデータベースを作成します。")
                 with st.spinner("処理中...\n(ページ本文にテキストを追加するため、通常より時間がかかる場合があります)"):
                     db_id = create_database(notion, parent_page_id, db_name)
-                    
-                    if db_id:
+
+                    if db_id: # データベース作成が成功した場合のみデータを追加
                         add_rows_to_db(notion, db_id, excel_file_path)
                         db_link = f"https://notion.so/{db_id.replace('-', '')}"
                         st.markdown(f"[作成されたデータベースを開く]({db_link})")
